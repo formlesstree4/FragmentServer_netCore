@@ -1,106 +1,145 @@
-﻿using System;
-using System.IO;
+﻿using FragmentServerWV.Exceptions;
+using FragmentServerWV.Services;
+using FragmentServerWV.Services.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
+using Serilog;
+using Serilog.Formatting.Json;
+using Serilog.Sinks.SystemConsole.Themes;
+using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
-using System.Text;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using FragmentServerWV.Exceptions;
-using FragmentServerWV.Services;
+using Unity;
+using Unity.Injection;
+using Unity.Lifetime;
 
 namespace FragmentServerWV
 {
-    public static class Server
+
+    /// <summary>
+    /// Defines the main listener loop for the .hack//fragment service
+    /// </summary>
+    /// <remarks>
+    /// While only one global instance is supported, technically multiple instances of the class can be created
+    /// </remarks>
+    public sealed class Server
     {
-        public static Thread t;
-        public static bool _exit = false;
-        public static bool _proxymode = false;
-        public static string proxyIP;
-        public static readonly object _sync = new object();
-        public static List<GameClient> clients;
-        public static List<ProxyClient> proxies;
-        public static Dictionary<int,LobbyChatRoom> lobbyChatRooms;
-        public static TcpListener listener;
 
-        public static void StartProxy(string targetIP)
+        private readonly CancellationTokenSource tokenSource;
+        private readonly IPAddress ipAddress;
+        private readonly ushort port;
+        private readonly ILogger logger;
+        private readonly IClientProviderService gameClientService;
+        private readonly ILobbyChatService lobbyChatService;
+        private readonly IClientConnectionService clientConnectionService;
+        
+
+
+        /// <summary>
+        /// Gets the globally available instance of <see cref="Server"/>
+        /// </summary>
+        public static Server Instance { get; private set; }
+
+        /// <summary>
+        /// Gets the token for cancellation
+        /// </summary>
+        public CancellationToken CancellationToken => tokenSource.Token;
+        
+        /// <summary>
+        /// Gets the service for handling <see cref="GameClient"/> instances
+        /// </summary>
+        public IClientProviderService GameClientService => gameClientService;
+
+        /// <summary>
+        /// Gets the service for handling <see cref="LobbyChatRoom"/> instances
+        /// </summary>
+        public ILobbyChatService LobbyChatService => lobbyChatService;
+
+
+
+        public Server(
+            ILogger logger,
+            IClientProviderService gameClientService,
+            ILobbyChatService lobbyChatService,
+            IClientConnectionService clientConnectionService,
+            SimpleConfiguration configuration)
         {
-            proxyIP = targetIP;
-            _proxymode = true;
-            Start();
+            IPAddress.TryParse(configuration.Get("ip"), out this.ipAddress);
+            ushort.TryParse(configuration.Get("port"), out this.port);
+            this.logger = logger;
+            this.gameClientService = gameClientService;
+            this.lobbyChatService = lobbyChatService;
+            this.clientConnectionService = clientConnectionService;
+            this.tokenSource = new CancellationTokenSource();
         }
 
-        public static void Start()
-        {
-            clients = new List<GameClient>();
-            proxies = new List<ProxyClient>();
-            lobbyChatRooms = new Dictionary<int, LobbyChatRoom>();
-            if (!_proxymode)
-            {
-                ushort lobbyID = 1;
-                lobbyChatRooms.Add(lobbyID,new LobbyChatRoom("Main Lobby", lobbyID, 0x7403));
-            }
 
-            //DBAcess.getInstance().LoadMessageOfDay();
-            ThreadPool.QueueUserWorkItem(new WaitCallback(MainThread));
-            // t = new Thread(MainThread);
-           // t.Start();
+        /// <summary>
+        /// Starts listening for Tcp connections to the server
+        /// </summary>
+        public void Start()
+        {
+            this.clientConnectionService.BeginListening(this.ipAddress, this.port);
         }
 
-        public static void Stop()
+        /// <summary>
+        /// Requests for the server to stop listening
+        /// </summary>
+        public async Task Stop()
         {
-            lock (_sync)
-            {
-                _exit = true;
-                if (listener != null)
-                    listener.Stop();
-            }
+            await this.SafeShutdownInternal();
         }
 
-        public static void MainThread(object obj)
-        {
-            string ip = Config.configs["ip"];
-            //string any = IPAddress.Loopback.ToString();
-            listener = new TcpListener(IPAddress.Parse(Config.configs["ip"]), Convert.ToUInt16(Config.configs["port"]));
-            Log.Writeline("Server started on " + ip + ":" + Config.configs["port"]);
-            Log.Writeline(" Log Size = " + Convert.ToInt32(Config.configs["logsize"]));
-            Log.Writeline(" Ping Delay = " + Convert.ToInt32(Config.configs["ping"]) + "ms");
-            Log.Writeline(" Proxy Mode = " + _proxymode);
-            if (_proxymode)
-                Log.Writeline(" Proxy Target IP = " + proxyIP);
-            listener.Start();
-            bool run = true;
-            int count = 1;
+        public void StartProxy(string targetIp) => throw new NotImplementedException("TODO: Tell formless to look at C++ code if you need this otherwise nah.");
 
-            try
+
+
+
+        private async Task SafeShutdownInternal()
+        {
+            logger.Information("The server has been told to shutdown...");
+            this.clientConnectionService.EndListening();
+            logger.Information("New connections are no longer being accepted");
+
+            if (gameClientService.Clients.Any())
             {
-                while (run)
+                foreach (var lcs in lobbyChatService.Lobbies)
                 {
-                    TcpClient client = listener.AcceptTcpClient();
-                    if (_proxymode)
-                        proxies.Add(new ProxyClient(client, count, proxyIP, Config.configs["port"]));
-                    else
-                        clients.Add(new GameClient(client, count));
-                    Log.Writeline("New client connected with ID #" + count++);
-                    lock (_sync)
-                    {
-                        run = !_exit;
-                    }
+                    var lobby = lcs.Value;
+                    await lobby.SendServerMessageAsync("ATTN: SERVER WILL CLOSE");
+                    await lobby.SendServerMessageAsync("IN APPROX 1 MINUTE");
+                    await Task.Delay(TimeSpan.FromMilliseconds(100));
+                    await lobby.SendServerMessageAsync("TRANSFER TO AREA SERVER");
+                    await lobby.SendServerMessageAsync("OR YOU WILL BE DC'D");
                 }
+
+                await Task.Delay(TimeSpan.FromSeconds(30));
+                foreach (var lcs in lobbyChatService.Lobbies)
+                {
+                    var lobby = lcs.Value;
+                    await lobby.SendServerMessageAsync("ATTN: SERVER WILL CLOSE");
+                    await lobby.SendServerMessageAsync("IN APPROX 30 SECONDS");
+                    await Task.Delay(TimeSpan.FromMilliseconds(100));
+                    await lobby.SendServerMessageAsync("TRANSFER TO AREA SERVER");
+                    await lobby.SendServerMessageAsync("OR YOU WILL BE DC'D");
+                }
+                await Task.Delay(TimeSpan.FromSeconds(30));
             }
-            catch (Exception e)
+
+            logger.Information("The server is now closing");
+            foreach (var client in GameClientService.Clients)
             {
-                throw new LobbyEmuCrashException("Server Crashed ",t,e);
+                logger.Verbose($"Shutting down {client.Name}");
+                client.Exit();
             }
-            finally
-            {
-                foreach (GameClient client in clients)
-                    client.Exit();
-                foreach (ProxyClient client in proxies)
-                    client.Exit();
-                Log.Writeline("Server exited");
-            }
+
         }
+
     }
+
 }

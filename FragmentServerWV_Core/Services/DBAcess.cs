@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Text;
+using FragmentServerWV.Entities;
 using FragmentServerWV.Models;
 using NHibernate;
 using NHibernate.Cfg;
@@ -66,12 +68,21 @@ namespace FragmentServerWV.Services
             using (ISession session = _sessionFactory.OpenSession())
             {
                 using ITransaction transaction = session.BeginTransaction();
-                threadLists.AddRange(
-                    session.Query<BbsThreadModel>().Where
-                            (x => x.categoryID == categoryID)
-                        .ToList());
+                var threads = session.CreateSQLQuery(@"SELECT
+	                th.threadID,
+                    th.threadTitle,
+                    th.categoryID
+                FROM
+	                BBS_Threads th
+                INNER JOIN BBS_Post_Meta pm ON pm.threadID = th.threadID
+                ORDER BY
+	                pm.Date DESC")
+                    .AddEntity(typeof(BbsThreadModel))
+                    .List<BbsThreadModel>()
+                    .Where(x => x.categoryID == categoryID)
+                    .Distinct(new BbsThreadModelComparer());
+                threadLists.AddRange(threads);
                 transaction.Commit();
-
                 session.Close();
             }
 
@@ -215,9 +226,9 @@ namespace FragmentServerWV.Services
             Console.WriteLine("post Body " + postBody);
         }
 
-        public uint PlayerLogin(GameClient client)
+
+        public uint PlayerLogin(GameClientAsync client)
         {
-            
             ///////////////Player Logging ///////////////////////////////////////////////////////////////////////////////
             RankingDataModel model = new RankingDataModel();
 
@@ -232,47 +243,47 @@ namespace FragmentServerWV.Services
             model.characterName = _encoding.GetString(client.char_name, 0, client.char_name.Length - 1);
             //Buffer.BlockCopy(client.char_name,0,model.characterName,0,client.char_name.Length-1);
 
-            PlayerClass playerClass = (PlayerClass) client.char_class;
+            PlayerClass playerClass = (PlayerClass)client.char_class;
             model.characterClassName = playerClass.ToString();
             model.characterLevel = client.char_level;
 
             model.characterHP = client.char_HP;
             model.characterSP = client.char_SP;
-            model.characterGP = (int) client.char_GP;
+            model.characterGP = (int)client.char_GP;
             model.godStatusCounterOnline = client.online_god_counter;
             model.averageFieldLevel = client.offline_godcounter;
             model.accountID = client.AccountId;
             ///////////////Player Logging ///////////////////////////////////////////////////////////////////////////////
-            
+
             using ISession session = _sessionFactory.OpenSession();
 
             using ITransaction transaction = session.BeginTransaction();
 
             CharacterRepositoryModel characterRepositoryModel;
-            
+
             characterRepositoryModel = session.Query<CharacterRepositoryModel>().SingleOrDefault(
                 x => x.accountID == client.AccountId && x.charachterSaveID.Equals(model.characterSaveID));
             if (characterRepositoryModel == null || characterRepositoryModel.PlayerID == -1 ||
                 characterRepositoryModel.PlayerID == 0)
             {
                 characterRepositoryModel = new CharacterRepositoryModel();
-                
+
                 characterRepositoryModel.GuildID = 0;
                 characterRepositoryModel.GuildMaster = 0;
-                
+
                 characterRepositoryModel.accountID = client.AccountId;
                 characterRepositoryModel.charachterSaveID = model.characterSaveID;
-                
+
             }
             characterRepositoryModel.CharachterName = client.char_name;
             characterRepositoryModel.Greeting = client.greeting;
             characterRepositoryModel.ClassID = client.char_class;
             characterRepositoryModel.CharachterLevel = client.char_level;
             characterRepositoryModel.OnlineStatus = true;
-            characterRepositoryModel.ModelNumber = (int) client.char_model;
+            characterRepositoryModel.ModelNumber = (int)client.char_model;
             characterRepositoryModel.charHP = client.char_HP;
             characterRepositoryModel.charSP = client.char_SP;
-            characterRepositoryModel.charGP = (int) client.char_GP;
+            characterRepositoryModel.charGP = (int)client.char_GP;
             characterRepositoryModel.charOnlineGoat = client.online_god_counter;
             characterRepositoryModel.charOfflineGoat = client.offline_godcounter;
             characterRepositoryModel.charGoldCoin = client.goldCoinCount;
@@ -286,7 +297,7 @@ namespace FragmentServerWV.Services
 
             session.Close();
 
-            return (uint) characterRepositoryModel.PlayerID;
+            return (uint)characterRepositoryModel.PlayerID;
         }
 
         public void setPlayerAsOffline(uint playerID)
@@ -737,7 +748,7 @@ namespace FragmentServerWV.Services
             }
 
 
-            return messageModel.Message;
+            return messageModel?.Message ?? "";
         }
 
         public void RefreshMessageOfTheDay()
@@ -750,5 +761,14 @@ namespace FragmentServerWV.Services
             get => _messageOfTheDay;
             set => _messageOfTheDay = value;
         }
+
+
+        private sealed class BbsThreadModelComparer : IEqualityComparer<BbsThreadModel>
+        {
+            public bool Equals([AllowNull] BbsThreadModel x, [AllowNull] BbsThreadModel y) => x.threadID == y.threadID;
+
+            public int GetHashCode([DisallowNull] BbsThreadModel obj) => obj.threadID.GetHashCode();
+        }
+
     }
 }
