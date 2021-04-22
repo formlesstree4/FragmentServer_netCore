@@ -214,6 +214,31 @@ namespace FragmentServerWV.Entities
             tokenSource.Cancel();
         }
 
+        /// <summary>
+        /// Sets the client sequence number
+        /// </summary>
+        /// <param name="num">The number</param>
+        public void SetClientSequenceNumber(ushort num) => this.client_seq_nr = num;
+
+        /// <summary>
+        /// Initializes the decryption key system for the client
+        /// </summary>
+        /// <param name="key">The decryption key to use</param>
+        public void InitializeDecryptionKey(byte[] key)
+        {
+            from_key = key;
+            from_crypto.PrepareStructure(key);
+        }
+
+        /// <summary>
+        /// Initializes the encryption key system for the client
+        /// </summary>
+        /// <param name="key">The encryption key to use</param>
+        public void InitializeEncryptionKey(byte[] key)
+        {
+            to_key = key;
+            to_crypto.PrepareStructure(key);
+        }
 
 
         private async Task InternalConnectionLoop(CancellationToken token)
@@ -242,9 +267,21 @@ namespace FragmentServerWV.Entities
                             // Packet has been read, bring over what we do now
                             try
                             {
-#if !USE_NEW_HANDLER
+#if !USE_NEW_HANDLER && !USE_HYBRID_APPROACH
                                 await HandleIncomingPacket(packet);
-#else
+#elif USE_HYBRID_APPROACH
+
+                                if (opCodeHandler.CanHandleRequest(packet))
+                                {
+                                    var response = await opCodeHandler.HandlePacketAsync(this, packet);
+                                    await ns.WriteAsync(response.Data);
+                                    server_seq_nr++;
+                                }
+                                else
+                                {
+                                    await HandleIncomingPacket(packet);
+                                }
+#elif USE_NEW_HANDLER && !USE_HYBRID_APPROACH
                                 var response = await opCodeHandler.HandlePacketAsync(this, packet);
                                 await ns.WriteAsync(response.Data);
                                 server_seq_nr++;

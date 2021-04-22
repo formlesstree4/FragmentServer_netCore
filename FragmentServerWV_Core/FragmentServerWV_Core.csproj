@@ -58,7 +58,7 @@
     <EmbeddedResource Include="Models\Mapping\GuildRepositoryModel.hbm.xml" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Entities\OpCodes\" />
+    <Folder Include="Entities\OpCodeHandlers\Data\" />
   </ItemGroup>
 
 <!--
