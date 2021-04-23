@@ -57,9 +57,6 @@
     <None Remove="Models\Mapping\GuildRepositoryModel.hbm.xml" />
     <EmbeddedResource Include="Models\Mapping\GuildRepositoryModel.hbm.xml" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Entities\OpCodeHandlers\Data\" />
-  </ItemGroup>
 
 <!--
 <ItemGroup>
