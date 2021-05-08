@@ -548,13 +548,13 @@ namespace FragmentServerWV.Entities
                 case OpCodes.OPCODE_DATA_GUILD_DONATE_COINS:// donate Coins to Guild
                     await HandlePlayerDonatesCoinsToGuild(argument);
                     break;
-                case OpCodes.OPCODE_INVITE_TO_GUILD: //invite player to Guild
+                case OpCodes.OPCODE_DATA_INVITE_TO_GUILD: //invite player to Guild
                     await HandleInvitePlayerToGuild(argument);
                     break;
-                case OpCodes.OPCODE_ACCEPT_GUILD_INVITE: //accept Guild Invitation
+                case OpCodes.OPCODE_DATA_ACCEPT_GUILD_INVITE: //accept Guild Invitation
                     await HandleGuildAcceptOrReject(argument);
                     break;
-                case OpCodes.OPCODE_GUILD_VIEW: //get Guild info (in lobby )
+                case OpCodes.OPCODE_DATA_GUILD_VIEW: //get Guild info (in lobby )
                     await HandleGuildView(argument);
                     break;
                 case OpCodes.OPCODE_DATA_AS_UPDATE_STATUS:
